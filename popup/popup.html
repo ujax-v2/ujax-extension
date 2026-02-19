@@ -47,13 +47,22 @@
       color: #6b7280;
       min-height: 16px;
     }
-    .stats {
+    .section {
       margin-top: 12px;
       padding-top: 10px;
       border-top: 1px solid #e5e7eb;
       font-size: 12px;
       color: #6b7280;
     }
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-no { background: #fee2e2; color: #991b1b; }
   </style>
 </head>
 <body>
@@ -65,8 +74,17 @@
   </div>
   <div class="status" id="status"></div>
 
-  <div class="stats">
+  <div class="section">
     수집된 문제: <strong id="count">0</strong>개
+  </div>
+
+  <div class="section">
+    <div style="margin-bottom: 6px;">
+      UJAX: <span id="ujaxBadge" class="badge badge-no">미연결</span>
+    </div>
+    <div>
+      백준: <span id="bojBadge" class="badge badge-no">미감지</span>
+    </div>
   </div>
 
   <script src="popup.js"></script>
