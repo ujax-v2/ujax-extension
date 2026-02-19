@@ -2,12 +2,16 @@
 // ──────────────────────────────────────────────────────────────
 // 문제 데이터 수신 → 중복 체크 → solved.ac 보강 → 백엔드 전송
 // + 백준 아이디 자동 연동
+// + On-Demand 크롤링 관리 (pendingCrawls)
 // ──────────────────────────────────────────────────────────────
 
 const API_BASE = "http://localhost:8080";
 const PROBLEM_INGEST_PATH = "/api/v1/problems/ingest";
 const SUBMISSION_INGEST_PATH = "/api/v1/submissions/ingest";
 const USER_ME_PATH = "/api/v1/users/me";
+
+// UJAX 프론트엔드 URL 패턴
+const UJAX_FRONT_URLS = ["http://localhost:5173/*", "https://ujax.site/*"];
 
 // solved.ac 티어 매핑 (0~30)
 const TIER_NAMES = [
@@ -38,6 +42,40 @@ async function addToCrawledSet(problemNum) {
 async function isAlreadyCrawled(problemNum) {
   const set = await getCrawledSet();
   return set.has(problemNum);
+}
+
+// ──────────────────────────────────────────────────────────────
+// On-Demand 크롤링: pendingCrawls 관리
+// ──────────────────────────────────────────────────────────────
+
+async function addToPendingCrawls(problemNum) {
+  const { pendingCrawls } = await chrome.storage.local.get("pendingCrawls");
+  const pending = pendingCrawls || [];
+  if (!pending.includes(problemNum)) {
+    pending.push(problemNum);
+    await chrome.storage.local.set({ pendingCrawls: pending });
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// 크롤링 완료를 UJAX 프론트엔드에 알림
+// ──────────────────────────────────────────────────────────────
+
+async function notifyFrontend(problemNum, success) {
+  try {
+    const tabs = await chrome.tabs.query({
+      url: UJAX_FRONT_URLS,
+    });
+    for (const tab of tabs) {
+      chrome.tabs.sendMessage(tab.id, {
+        type: "crawlComplete",
+        problemNum,
+        success,
+      }).catch(() => {});
+    }
+  } catch {
+    // 프론트엔드 탭이 없으면 무시
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -141,7 +179,7 @@ async function isAlreadySentSubmission(submissionId) {
 
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "problemData") {
-    handleProblemData(message.data);
+    handleProblemData(message.data, sender.tab?.id);
     return;
   }
 
@@ -150,11 +188,26 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     return;
   }
 
+  // 팝업 수동 크롤링
   if (message?.type === "manualCrawl") {
     const problemNum = message.problemNum;
-    chrome.tabs.create({
-      url: `https://www.acmicpc.net/problem/${problemNum}`,
-      active: true,
+    addToPendingCrawls(problemNum).then(() => {
+      chrome.tabs.create({
+        url: `https://www.acmicpc.net/problem/${problemNum}`,
+        active: true,
+      });
+    });
+    return;
+  }
+
+  // 프론트엔드(ujaxBridge.js)에서 요청한 on-demand 크롤링
+  if (message?.type === "crawlRequest") {
+    const problemNum = message.problemNum;
+    addToPendingCrawls(problemNum).then(() => {
+      chrome.tabs.create({
+        url: `https://www.acmicpc.net/problem/${problemNum}`,
+        active: false,
+      });
     });
     return;
   }
@@ -178,12 +231,17 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
 });
 
-async function handleProblemData(data) {
+async function handleProblemData(data, senderTabId) {
   const problemNum = Number(data.problemNum);
   if (!problemNum || !data.title) return;
 
   if (await isAlreadyCrawled(problemNum)) {
     console.log(`[UJAX] 스킵: ${problemNum}번 (이미 수집됨)`);
+    await notifyFrontend(problemNum, true);
+    // 크롤링용 탭 닫기
+    if (senderTabId) {
+      chrome.tabs.remove(senderTabId).catch(() => {});
+    }
     return;
   }
 
@@ -216,14 +274,23 @@ async function handleProblemData(data) {
     if (res.ok) {
       await addToCrawledSet(problemNum);
       console.log(`[UJAX] 등록 완료: ${problemNum}번 ${data.title}`);
+      await notifyFrontend(problemNum, true);
     } else if (res.status === 409) {
       await addToCrawledSet(problemNum);
       console.log(`[UJAX] 이미 등록됨: ${problemNum}번 (캐시 갱신)`);
+      await notifyFrontend(problemNum, true);
     } else {
       console.warn(`[UJAX] 등록 실패: ${problemNum}번 (HTTP ${res.status})`);
+      await notifyFrontend(problemNum, false);
     }
   } catch (err) {
     console.error(`[UJAX] 네트워크 오류: ${problemNum}번`, err.message);
+    await notifyFrontend(problemNum, false);
+  }
+
+  // 크롤링용 탭 닫기
+  if (senderTabId) {
+    chrome.tabs.remove(senderTabId).catch(() => {});
   }
 }
 

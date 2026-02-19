@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "UJAX Problem Collector",
   "version": "1.1.0",
-  "description": "백준 문제 페이지 방문 시 자동으로 문제 데이터를 수집합니다",
+  "description": "UJAX에서 문제 등록 시 백준 문제 데이터를 수집합니다",
   "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://www.acmicpc.net/*",

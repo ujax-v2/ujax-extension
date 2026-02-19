@@ -1,67 +1,81 @@
 // content.js
 // ──────────────────────────────────────────────────────────────
 // 백준 문제 페이지(acmicpc.net/problem/{번호})에서 실행되는 Content Script
-// DOM에서 문제 데이터를 파싱하여 background.js로 전달한다.
+// pendingCrawls에 등록된 문제만 크롤링한다. (On-Demand 방식)
 // ──────────────────────────────────────────────────────────────
 (function () {
   // /problem/{숫자} 형태가 아니면 무시
   if (!/\/problem\/\d+/.test(location.pathname)) return;
 
   const problemNum = Number(location.pathname.split("/").pop());
-  const $ = (sel) => document.querySelector(sel);
-  const html = (el) => (el ? el.innerHTML.trim() : "");
-  const txt = (el) => (el ? el.innerText.trim() : "");
 
-  const title = txt($("#problem_title"));
-  const description = html($("#problem_description"));
-  const inputDescription = html($("#problem_input"));
-  const outputDescription = html($("#problem_output"));
+  // pendingCrawls에 현재 문제가 있는지 확인
+  chrome.storage.local.get("pendingCrawls", ({ pendingCrawls }) => {
+    const pending = pendingCrawls || [];
+    if (!pending.includes(problemNum)) {
+      console.log(`[UJAX] 스킵: ${problemNum}번 (요청된 크롤링 아님)`);
+      return;
+    }
 
-  // 시간/메모리 제한 — #problem-info 테이블에서 추출
-  let timeLimit = "";
-  let memoryLimit = "";
-  const infoTable = $("#problem-info");
-  if (infoTable) {
-    const ths = [...infoTable.querySelectorAll("thead th")].map((th) => th.textContent.trim());
-    const tds = [...infoTable.querySelectorAll("tbody tr:first-child td")].map((td) => td.textContent.trim());
-    const findVal = (regex) => {
-      const idx = ths.findIndex((h) => regex.test(h));
-      return idx >= 0 ? tds[idx] : "";
+    const $ = (sel) => document.querySelector(sel);
+    const html = (el) => (el ? el.innerHTML.trim() : "");
+    const txt = (el) => (el ? el.innerText.trim() : "");
+
+    const title = txt($("#problem_title"));
+    const description = html($("#problem_description"));
+    const inputDescription = html($("#problem_input"));
+    const outputDescription = html($("#problem_output"));
+
+    // 시간/메모리 제한 — #problem-info 테이블에서 추출
+    let timeLimit = "";
+    let memoryLimit = "";
+    const infoTable = $("#problem-info");
+    if (infoTable) {
+      const ths = [...infoTable.querySelectorAll("thead th")].map((th) => th.textContent.trim());
+      const tds = [...infoTable.querySelectorAll("tbody tr:first-child td")].map((td) => td.textContent.trim());
+      const findVal = (regex) => {
+        const idx = ths.findIndex((h) => regex.test(h));
+        return idx >= 0 ? tds[idx] : "";
+      };
+      timeLimit = findVal(/시간\s*제한|Time/i);
+      memoryLimit = findVal(/메모리\s*제한|Memory/i);
+    }
+
+    // 입출력 예제 (최대 20개)
+    const samples = [];
+    for (let i = 1; i <= 20; i++) {
+      const inputEl = document.getElementById(`sample-input-${i}`);
+      const outputEl = document.getElementById(`sample-output-${i}`);
+      if (!inputEl && !outputEl) break;
+      samples.push({
+        sampleIndex: i,
+        input: (inputEl?.textContent || "").replace(/\s+$/, ""),
+        output: (outputEl?.textContent || "").replace(/\s+$/, ""),
+      });
+    }
+
+    // 문제 태그 (페이지에 노출된 경우)
+    const tagEls = document.querySelectorAll(".problem-tag a, .problem-label-tag a");
+    const tags = [...tagEls].map((a) => a.textContent.trim()).filter(Boolean);
+
+    const payload = {
+      problemNum,
+      title,
+      url: location.href,
+      timeLimit,
+      memoryLimit,
+      description,
+      inputDescription,
+      outputDescription,
+      samples,
+      tags,
     };
-    timeLimit = findVal(/시간\s*제한|Time/i);
-    memoryLimit = findVal(/메모리\s*제한|Memory/i);
-  }
 
-  // 입출력 예제 (최대 20개)
-  const samples = [];
-  for (let i = 1; i <= 20; i++) {
-    const inputEl = document.getElementById(`sample-input-${i}`);
-    const outputEl = document.getElementById(`sample-output-${i}`);
-    if (!inputEl && !outputEl) break;
-    samples.push({
-      sampleIndex: i,
-      input: (inputEl?.textContent || "").replace(/\s+$/, ""),
-      output: (outputEl?.textContent || "").replace(/\s+$/, ""),
-    });
-  }
+    // pendingCrawls에서 현재 문제 제거
+    const updated = pending.filter((n) => n !== problemNum);
+    chrome.storage.local.set({ pendingCrawls: updated });
 
-  // 문제 태그 (페이지에 노출된 경우)
-  const tagEls = document.querySelectorAll(".problem-tag a, .problem-label-tag a");
-  const tags = [...tagEls].map((a) => a.textContent.trim()).filter(Boolean);
-
-  const payload = {
-    problemNum,
-    title,
-    url: location.href,
-    timeLimit,
-    memoryLimit,
-    description,
-    inputDescription,
-    outputDescription,
-    samples,
-    tags,
-  };
-
-  chrome.runtime.sendMessage({ type: "problemData", data: payload });
-  console.log("[UJAX] 문제 데이터 전송:", problemNum, title);
+    chrome.runtime.sendMessage({ type: "problemData", data: payload });
+    console.log("[UJAX] 문제 데이터 전송:", problemNum, title);
+  });
 })();
