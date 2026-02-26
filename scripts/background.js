@@ -61,17 +61,15 @@ async function addToPendingCrawls(problemNum) {
 // 크롤링 완료를 UJAX 프론트엔드에 알림
 // ──────────────────────────────────────────────────────────────
 
-async function notifyFrontend(problemNum, success) {
+async function notifyFrontend(problemNum, success, reason) {
   try {
     const tabs = await chrome.tabs.query({
       url: UJAX_FRONT_URLS,
     });
+    const msg = { type: "crawlComplete", problemNum, success };
+    if (reason) msg.reason = reason;
     for (const tab of tabs) {
-      chrome.tabs.sendMessage(tab.id, {
-        type: "crawlComplete",
-        problemNum,
-        success,
-      }).catch(() => {});
+      chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
     }
   } catch {
     // 프론트엔드 탭이 없으면 무시
@@ -231,17 +229,25 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
 });
 
+async function closeCrawlTab(tabId) {
+  if (tabId) {
+    chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
+
 async function handleProblemData(data, senderTabId) {
   const problemNum = Number(data.problemNum);
-  if (!problemNum || !data.title) return;
+  if (!problemNum || !data.title) {
+    console.warn(`[UJAX] 크롤링 실패: 유효하지 않은 데이터 (problemNum=${data.problemNum})`);
+    if (problemNum) await notifyFrontend(problemNum, false, "NOT_FOUND");
+    closeCrawlTab(senderTabId);
+    return;
+  }
 
   if (await isAlreadyCrawled(problemNum)) {
     console.log(`[UJAX] 스킵: ${problemNum}번 (이미 수집됨)`);
     await notifyFrontend(problemNum, true);
-    // 크롤링용 탭 닫기
-    if (senderTabId) {
-      chrome.tabs.remove(senderTabId).catch(() => {});
-    }
+    closeCrawlTab(senderTabId);
     return;
   }
 
@@ -281,17 +287,14 @@ async function handleProblemData(data, senderTabId) {
       await notifyFrontend(problemNum, true);
     } else {
       console.warn(`[UJAX] 등록 실패: ${problemNum}번 (HTTP ${res.status})`);
-      await notifyFrontend(problemNum, false);
+      await notifyFrontend(problemNum, false, "SERVER_ERROR");
     }
   } catch (err) {
     console.error(`[UJAX] 네트워크 오류: ${problemNum}번`, err.message);
-    await notifyFrontend(problemNum, false);
+    await notifyFrontend(problemNum, false, "NETWORK_ERROR");
   }
 
-  // 크롤링용 탭 닫기
-  if (senderTabId) {
-    chrome.tabs.remove(senderTabId).catch(() => {});
-  }
+  closeCrawlTab(senderTabId);
 }
 
 // ──────────────────────────────────────────────────────────────

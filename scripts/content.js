@@ -22,6 +22,16 @@
     const txt = (el) => (el ? el.innerText.trim() : "");
 
     const title = txt($("#problem_title"));
+
+    // 문제 페이지가 존재하지 않으면 빈 데이터를 보내서 background가 탭을 닫도록 함
+    if (!title) {
+      const updated = pending.filter((n) => n !== problemNum);
+      chrome.storage.local.set({ pendingCrawls: updated });
+      chrome.runtime.sendMessage({ type: "problemData", data: { problemNum, title: "" } });
+      console.warn(`[UJAX] 크롤링 실패: ${problemNum}번 문제를 찾을 수 없음`);
+      return;
+    }
+
     const description = html($("#problem_description"));
     const inputDescription = html($("#problem_input"));
     const outputDescription = html($("#problem_output"));

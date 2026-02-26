@@ -5,18 +5,32 @@
 // 2) 프론트엔드 ↔ 확장 프로그램 간 크롤링 요청/완료 메시지 중계
 // ──────────────────────────────────────────────────────────────
 (function () {
+  /** extension 컨텍스트가 유효한지 확인 (리로드/업데이트 후 무효화 방지) */
+  function isContextValid() {
+    try {
+      return !!chrome.runtime?.id;
+    } catch {
+      return false;
+    }
+  }
+
+  function safeSendMessage(msg) {
+    if (!isContextValid()) return;
+    chrome.runtime.sendMessage(msg).catch(() => {});
+  }
+
   // ── 토큰 전달 ──────────────────────────────────────────────
 
   function sendToken() {
     try {
       const raw = localStorage.getItem("auth");
       if (!raw) {
-        chrome.runtime.sendMessage({ type: "ujaxToken", token: null });
+        safeSendMessage({ type: "ujaxToken", token: null });
         return;
       }
       const auth = JSON.parse(raw);
       if (auth.accessToken) {
-        chrome.runtime.sendMessage({
+        safeSendMessage({
           type: "ujaxToken",
           token: auth.accessToken,
         });
@@ -39,7 +53,7 @@
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     if (event.data?.type === "ujaxCrawlRequest" && event.data?.problemNum) {
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: "crawlRequest",
         problemNum: event.data.problemNum,
       });
@@ -48,13 +62,17 @@
 
   // ── 크롤링 완료 중계: 확장 프로그램 → 프론트 ────────────────
 
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type === "crawlComplete") {
-      window.postMessage({
-        type: "ujaxCrawlComplete",
-        problemNum: message.problemNum,
-        success: message.success,
-      }, "*");
-    }
-  });
+  if (isContextValid()) {
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === "crawlComplete") {
+        const msg = {
+          type: "ujaxCrawlComplete",
+          problemNum: message.problemNum,
+          success: message.success,
+        };
+        if (message.reason) msg.reason = message.reason;
+        window.postMessage(msg, "*");
+      }
+    });
+  }
 })();
