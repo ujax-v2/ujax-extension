@@ -76,6 +76,35 @@ async function notifyFrontend(problemNum, success, reason) {
   }
 }
 
+async function notifySubmissionResult(data) {
+  try {
+    const tabs = await chrome.tabs.query({ url: UJAX_FRONT_URLS });
+    console.log(`[UJAX] 프론트엔드 탭 ${tabs.length}개 발견`);
+
+    const payload = {
+      type: "ujaxSubmissionResult",
+      problemNum: data.problemNum,
+      verdict: data.verdict,
+      submissionId: data.submissionId,
+      time: data.time || "",
+      memory: data.memory || "",
+      language: data.language || "",
+    };
+
+    for (const tab of tabs) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: (msg) => { window.postMessage(msg, "*"); },
+        args: [payload],
+      });
+    }
+    console.log(`[UJAX] 프론트엔드에 결과 전달: ${data.submissionId}번 (${data.verdict})`);
+  } catch (err) {
+    console.error(`[UJAX] 프론트엔드 결과 전달 실패:`, err.message);
+  }
+}
+
 // ──────────────────────────────────────────────────────────────
 // solved.ac API로 티어/태그 보강
 // ──────────────────────────────────────────────────────────────
@@ -106,10 +135,21 @@ async function fetchSolvedAcMetadata(problemNum) {
 // ──────────────────────────────────────────────────────────────
 // 백엔드 API 전송
 // ──────────────────────────────────────────────────────────────
-async function sendToBackend(path, payload) {
+async function sendToBackend(path, payload, { requireAuth = false } = {}) {
+  const headers = { "Content-Type": "application/json" };
+
+  if (requireAuth) {
+    const { ujaxToken } = await chrome.storage.local.get("ujaxToken");
+    if (!ujaxToken) {
+      console.warn("[UJAX] 토큰 없음, 전송 스킵");
+      return { ok: false, status: 0, skipped: true };
+    }
+    headers["Authorization"] = `Bearer ${ujaxToken}`;
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
   return res;
@@ -175,6 +215,22 @@ async function isAlreadySentSubmission(submissionId) {
   return set.has(submissionId);
 }
 
+// ──────────────────────────────────────────────────────────────
+// 문제 컨텍스트 매핑: problemNum → workspaceProblemId
+// ──────────────────────────────────────────────────────────────
+
+async function setProblemContext(problemNum, workspaceProblemId) {
+  const { problemContextMap } = await chrome.storage.local.get("problemContextMap");
+  const map = problemContextMap || {};
+  map[String(problemNum)] = workspaceProblemId;
+  await chrome.storage.local.set({ problemContextMap: map });
+}
+
+async function getWorkspaceProblemId(problemNum) {
+  const { problemContextMap } = await chrome.storage.local.get("problemContextMap");
+  return problemContextMap?.[String(problemNum)] ?? null;
+}
+
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "problemData") {
     handleProblemData(message.data, sender.tab?.id);
@@ -182,7 +238,20 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
 
   if (message?.type === "submissionData") {
-    handleSubmissionData(message.data);
+    handleSubmissionData(message.data, sender.tab?.id);
+    return;
+  }
+
+  // sourceContent.js에서 소스 코드 수신
+  if (message?.type === "sourceCode") {
+    const sid = String(message.submissionId || "");
+    const entry = pendingSource.get(sid);
+    if (entry) {
+      entry.resolve(message.code || "");
+      try { chrome.tabs.remove(entry.tabId); } catch {}
+      pendingSource.delete(sid);
+      console.log(`[UJAX] 소스 코드 수신 완료: ${sid}번 (${(message.code || "").length}자)`);
+    }
     return;
   }
 
@@ -225,6 +294,19 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     } else {
       chrome.storage.local.remove(["ujaxToken", "bojIdLinked"]);
     }
+    return;
+  }
+
+  // 문제 컨텍스트 수신 (ujaxBridge.js → Frontend)
+  if (message?.type === "problemContext") {
+    setProblemContext(message.problemNum, message.workspaceProblemId);
+    console.log(`[UJAX] 문제 컨텍스트 저장: ${message.problemNum} → wpId=${message.workspaceProblemId}`);
+    return;
+  }
+
+  // 제출 요청 수신 (ujaxBridge.js → Frontend)
+  if (message?.type === "submitRequest") {
+    handleSubmitRequest(message);
     return;
   }
 });
@@ -298,42 +380,72 @@ async function handleProblemData(data, senderTabId) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// 제출 데이터 처리
+// 제출 데이터 처리 (소스 코드는 탭을 열어 content script로 수집)
 // ──────────────────────────────────────────────────────────────
 
-async function fetchSourceCode(submissionId) {
-  try {
-    const res = await fetch(
-      `https://www.acmicpc.net/source/${submissionId}`,
-      { credentials: "include" }
-    );
-    if (!res.ok) return "";
+const pendingSource = new Map();
 
-    const html = await res.text();
-    const match = html.match(
-      /<textarea[^>]*class="[^"]*codemirror-textarea[^"]*"[^>]*>([\s\S]*?)<\/textarea>/
+function openSourceTabAndGetCode(submissionId) {
+  const sid = String(submissionId);
+  return new Promise((resolve) => {
+    chrome.tabs.create(
+      { url: `https://www.acmicpc.net/source/${sid}`, active: false },
+      (tab) => {
+        if (!tab?.id) return resolve("");
+        pendingSource.set(sid, { resolve, tabId: tab.id });
+
+        // 8초 타임아웃
+        setTimeout(() => {
+          const entry = pendingSource.get(sid);
+          if (entry) {
+            entry.resolve("");
+            try { chrome.tabs.remove(tab.id); } catch {}
+            pendingSource.delete(sid);
+            console.warn(`[UJAX] 소스 코드 수집 타임아웃: ${sid}번`);
+          }
+        }, 8000);
+      }
     );
-    return match ? match[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&") : "";
-  } catch {
-    return "";
-  }
+  });
 }
 
-async function handleSubmissionData(data) {
+async function handleSubmissionData(data, statusTabId) {
   const submissionId = Number(data.submissionId);
   if (!submissionId) return;
 
+  async function closeBojTabs() {
+    await sleep(500);
+    const tabIds = new Set();
+    if (statusTabId) tabIds.add(statusTabId);
+    if (lastSubmitTabId) tabIds.add(lastSubmitTabId);
+
+    for (const id of tabIds) {
+      try { await chrome.tabs.remove(id); } catch {}
+    }
+    lastSubmitTabId = null;
+    if (tabIds.size > 0) console.log(`[UJAX] 백준 탭 ${tabIds.size}개 닫기 완료`);
+  }
+
   if (await isAlreadySentSubmission(submissionId)) {
     console.log(`[UJAX] 제출 스킵: ${submissionId}번 (이미 전송됨)`);
+    await closeBojTabs();
     return;
   }
 
-  const code = await fetchSourceCode(submissionId);
+  const workspaceProblemId = await getWorkspaceProblemId(data.problemNum);
+  if (!workspaceProblemId) {
+    console.log(`[UJAX] 제출 스킵: ${submissionId}번 (문제 컨텍스트 없음, problemNum=${data.problemNum})`);
+    await closeBojTabs();
+    return;
+  }
+
+  // 소스 코드 수집: /source/{id} 탭을 열어 sourceContent.js가 코드를 전달
+  console.log(`[UJAX] 소스 코드 수집 시작: ${submissionId}번`);
+  const code = await openSourceTabAndGetCode(submissionId);
 
   const payload = {
+    workspaceProblemId,
     submissionId: submissionId,
-    problemNum: data.problemNum,
-    username: data.username,
     verdict: data.verdict,
     time: data.time || "",
     memory: data.memory || "",
@@ -343,20 +455,195 @@ async function handleSubmissionData(data) {
   };
 
   try {
-    const res = await sendToBackend(SUBMISSION_INGEST_PATH, payload);
+    const res = await sendToBackend(SUBMISSION_INGEST_PATH, payload, { requireAuth: true });
+
+    if (res.skipped) {
+      await closeBojTabs();
+      return;
+    }
 
     if (res.ok) {
       await addToSentSubmissionSet(submissionId);
       console.log(`[UJAX] 제출 등록 완료: ${submissionId}번 (${data.verdict})`);
+      await notifySubmissionResult(data);
     } else if (res.status === 409) {
       await addToSentSubmissionSet(submissionId);
       console.log(`[UJAX] 제출 이미 등록됨: ${submissionId}번 (캐시 갱신)`);
+      await notifySubmissionResult(data);
+    } else if (res.status === 401) {
+      await chrome.storage.local.remove("ujaxToken");
+      console.warn(`[UJAX] 토큰 만료, 다음 로그인 시 재시도 (제출 ${submissionId}번)`);
     } else {
       console.warn(`[UJAX] 제출 등록 실패: ${submissionId}번 (HTTP ${res.status})`);
     }
   } catch (err) {
     console.error(`[UJAX] 제출 네트워크 오류: ${submissionId}번`, err.message);
   }
+
+  await closeBojTabs();
+}
+
+// ──────────────────────────────────────────────────────────────
+// 자동 제출 처리
+// chrome.scripting.executeScript를 사용하여 CSP 우회
+// ──────────────────────────────────────────────────────────────
+
+// 자동 제출로 열린 탭 ID (submit → status 리다이렉트 후에도 같은 탭)
+let lastSubmitTabId = null;
+
+const LANG_TO_BOJ = {
+  java: "93",       // Java 11
+  python: "28",     // Python 3
+  cpp: "1001",      // C++17
+  javascript: "17", // Node.js
+};
+
+function waitForTabLoad(tabId) {
+  return new Promise((resolve) => {
+    function listener(id, info) {
+      if (id === tabId && info.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function handleSubmitRequest({ problemNum, code, language }) {
+  if (!problemNum || !code) {
+    console.warn("[UJAX] 제출 요청 데이터 부족");
+    return;
+  }
+
+  console.log(`[UJAX] 자동 제출 시작: ${problemNum}번 (${language})`);
+
+  // 1) 백준 제출 페이지 열기 + 로드 대기
+  const tab = await chrome.tabs.create({
+    url: `https://www.acmicpc.net/submit/${problemNum}`,
+    active: false,
+  });
+  lastSubmitTabId = tab.id;
+  await waitForTabLoad(tab.id);
+  await sleep(500); // 에디터 초기화 대기
+
+  // 2) 언어 선택 (DOM 조작 — isolated world)
+  const bojLangId = LANG_TO_BOJ[language] || "93";
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (langId) => {
+      const select = document.getElementById("language");
+      if (select) {
+        select.value = langId;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        console.log("[UJAX] 언어 선택 완료:", langId);
+      } else {
+        console.warn("[UJAX] 언어 선택 드롭다운(#language)을 찾을 수 없음");
+      }
+    },
+    args: [bojLangId],
+  });
+  await sleep(500); // 언어 변경 후 에디터 재초기화 대기
+
+  // 3) 코드 입력 (Ace/CodeMirror 접근 — MAIN world 필수)
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    world: "MAIN",
+    func: (code) => {
+      var filled = false;
+
+      // Ace Editor
+      var aceEl = document.querySelector(".ace_editor");
+      if (aceEl && window.ace) {
+        var editor = window.ace.edit(aceEl);
+        editor.setValue(code, -1);
+        editor.clearSelection();
+        filled = true;
+        console.log("[UJAX] Ace Editor 코드 입력 완료");
+      }
+
+      // CodeMirror 5
+      if (!filled) {
+        var cmEl = document.querySelector(".CodeMirror");
+        if (cmEl && cmEl.CodeMirror) {
+          cmEl.CodeMirror.setValue(code);
+          filled = true;
+          console.log("[UJAX] CodeMirror 코드 입력 완료");
+        }
+      }
+
+      // hidden textarea 동기화 (폼 제출 시 이 값이 전송됨)
+      var textarea = document.querySelector('textarea[name="source"]');
+      if (!textarea) textarea = document.getElementById("source");
+      if (textarea) {
+        textarea.value = code;
+        if (!filled) {
+          textarea.dispatchEvent(new Event("input", { bubbles: true }));
+          console.log("[UJAX] textarea 코드 입력 완료 (fallback)");
+        }
+      }
+
+      if (!filled && !textarea) {
+        console.warn("[UJAX] 에디터를 찾을 수 없음");
+      }
+    },
+    args: [code],
+  });
+
+  // 4) Turnstile 대기 (최대 10초)
+  const TURNSTILE_TIMEOUT = 10_000;
+  const start = Date.now();
+  while (Date.now() - start < TURNSTILE_TIMEOUT) {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        var frame = document.querySelector(
+          'iframe[src*="turnstile"], iframe[src*="challenges.cloudflare.com"]'
+        );
+        if (!frame) return "no-turnstile";
+        var input = document.querySelector('input[name="cf-turnstile-response"]');
+        return input && input.value ? "ready" : "waiting";
+      },
+    });
+
+    if (result.result === "no-turnstile" || result.result === "ready") {
+      console.log(`[UJAX] Turnstile: ${result.result}`);
+      break;
+    }
+    await sleep(300);
+  }
+
+  // 5) 제출 버튼 클릭 (2초 대기 후)
+  await sleep(2000);
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      var btn =
+        document.getElementById("submit_button") ||
+        document.querySelector('button[type="submit"]') ||
+        document.querySelector('input[type="submit"]') ||
+        document.querySelector("#submit-form button") ||
+        document.querySelector("form button");
+      if (btn) {
+        btn.click();
+        console.log("[UJAX] 제출 버튼 클릭 완료");
+      } else {
+        var form = document.querySelector("form");
+        if (form) {
+          form.submit();
+          console.log("[UJAX] 폼 제출 완료 (fallback)");
+        } else {
+          console.warn("[UJAX] 제출 버튼/폼을 찾을 수 없음");
+        }
+      }
+    },
+  });
+
+  console.log(`[UJAX] 자동 제출 완료: ${problemNum}번`);
 }
 
 console.log("[UJAX] Background service worker 시작");
