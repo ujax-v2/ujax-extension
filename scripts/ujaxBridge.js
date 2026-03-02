@@ -48,14 +48,37 @@
     if (e.key === "auth") sendToken();
   });
 
-  // ── 크롤링 요청 중계: 프론트 → 확장 프로그램 ────────────────
+  // ── 프론트 → 확장 프로그램 메시지 중계 ────────────────────────
 
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
+
+    // 토큰 갱신 (같은 탭에서 refreshToken 시 storage 이벤트가 안 발생하므로 직접 전달)
+    if (event.data?.type === "ujaxTokenRefreshed" && event.data?.token) {
+      safeSendMessage({
+        type: "ujaxToken",
+        token: event.data.token,
+      });
+    }
     if (event.data?.type === "ujaxCrawlRequest" && event.data?.problemNum) {
       safeSendMessage({
         type: "crawlRequest",
         problemNum: event.data.problemNum,
+      });
+    }
+    if (event.data?.type === "ujaxProblemContext" && event.data?.problemNum && event.data?.workspaceProblemId) {
+      safeSendMessage({
+        type: "problemContext",
+        problemNum: event.data.problemNum,
+        workspaceProblemId: event.data.workspaceProblemId,
+      });
+    }
+    if (event.data?.type === "ujaxSubmitRequest" && event.data?.problemNum && event.data?.code) {
+      safeSendMessage({
+        type: "submitRequest",
+        problemNum: event.data.problemNum,
+        code: event.data.code,
+        language: event.data.language,
       });
     }
   });
@@ -72,6 +95,17 @@
         };
         if (message.reason) msg.reason = message.reason;
         window.postMessage(msg, "*");
+      }
+      if (message?.type === "submissionResult") {
+        window.postMessage({
+          type: "ujaxSubmissionResult",
+          problemNum: message.problemNum,
+          verdict: message.verdict,
+          submissionId: message.submissionId,
+          time: message.time,
+          memory: message.memory,
+          language: message.language,
+        }, "*");
       }
     });
   }
