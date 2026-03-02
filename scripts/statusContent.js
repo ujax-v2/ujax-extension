@@ -1,77 +1,76 @@
 // statusContent.js
 // ──────────────────────────────────────────────────────────────
 // 백준 채점 현황 페이지(acmicpc.net/status)에서 실행되는 Content Script
-// 제출 테이블의 행을 파싱하여 채점 완료된 제출 데이터를 background.js로 전달한다.
-//
-// 채점 현황 테이블 구조 (#status-table):
-//   제출 번호 | 아이디 | 문제 | 결과 | 메모리 | 시간 | 언어 | 코드 길이
+// 첫 번째 행이 '기다리는/채점' 상태일 때만 감시하여, 채점 완료 시 1회 전송한다.
+// 이미 채점 완료된 상태(이전 제출)라면 무시한다.
 // ──────────────────────────────────────────────────────────────
 (function () {
-  // 채점 중인 verdict (최종 결과가 아닌 상태)
-  const PENDING_VERDICTS = [
-    "채점 중", "기다리는 중", "채점 준비 중", "컴파일 중",
-    "Judging", "Waiting", "Compiling", "Preparing",
-  ];
+  const WAIT_RE = /(기다리는|채점|컴파일|Judging|Waiting|Compiling|Preparing)/;
+  let observing = false;
+  let sent = false;
 
-  // 이미 전송한 제출 번호 (페이지 내 중복 방지)
-  const sentSubmissions = new Set();
+  function pickFirstRow() {
+    return document.querySelector("#status-table tbody tr");
+  }
 
-  /**
-   * 테이블의 한 행(<tr>)에서 제출 데이터를 추출한다.
-   * 최종 verdict가 아직 나오지 않았으면 null을 반환한다.
-   */
   function parseRow(tr) {
-    const tds = tr.querySelectorAll("td");
-    if (tds.length < 8) return null;
+    const tds = tr?.querySelectorAll("td");
+    if (!tds || tds.length < 8) return null;
 
-    const submissionId = Number(tds[0].textContent.trim());
-    const username = tds[1].textContent.trim();
-    const problemNum = Number(
-      tds[2].querySelector("a")?.textContent.trim() || tds[2].textContent.trim()
-    );
-    const verdictEl = tds[3].querySelector(".result-text") || tds[3];
-    const verdict = verdictEl.textContent.trim();
-    const memory = tds[4].textContent.trim();
-    const time = tds[5].textContent.trim();
-    const language = tds[6].textContent.trim();
-    const codeLength = tds[7].textContent.trim();
+    const submissionId = (tds[0]?.innerText || "").trim();
+    const username = (tds[1]?.innerText || "").trim();
+    const link = tds[2]?.querySelector("a");
+    const problemNum = link
+      ? Number(new URL(link.href).pathname.split("/").pop())
+      : Number((tds[2]?.innerText || "").replace(/\D/g, "")) || null;
+    const verdict = (tds[3]?.innerText || "").trim();
+    const memory = (tds[4]?.innerText || "").trim();
+    const time = (tds[5]?.innerText || "").trim();
+    const language = (tds[6]?.innerText || "").trim();
+    const codeLength = (tds[7]?.innerText || "").trim();
 
-    if (!submissionId || !problemNum) return null;
-
-    // 채점 중이면 아직 최종 결과가 아님
-    if (PENDING_VERDICTS.some((p) => verdict.includes(p))) return null;
-
-    return { submissionId, problemNum, username, verdict, time, memory, language, codeLength };
+    return { submissionId, username, problemNum, verdict, time, memory, language, codeLength };
   }
 
-  /**
-   * 테이블 전체를 스캔하여 아직 전송하지 않은 완료된 제출을 background.js로 전달한다.
-   */
-  function scanTable() {
-    const table = document.getElementById("status-table");
-    if (!table) return;
+  function attachObserver() {
+    if (observing || sent) return;
 
-    const rows = table.querySelectorAll("tbody tr");
-    for (const tr of rows) {
-      const data = parseRow(tr);
-      if (!data) continue;
-      if (sentSubmissions.has(data.submissionId)) continue;
+    const row = pickFirstRow();
+    if (!row) return;
 
-      sentSubmissions.add(data.submissionId);
-      chrome.runtime.sendMessage({ type: "submissionData", data });
-      console.log(`[UJAX] 제출 데이터 전송: ${data.submissionId}번 (${data.verdict})`);
-    }
+    const dataNow = parseRow(row);
+    if (!dataNow) return;
+
+    // 첫 로딩 시 이미 채점 완료 상태 → 이전 제출이므로 스킵
+    if (!WAIT_RE.test(dataNow.verdict)) return;
+
+    const verdictCell = row.querySelector("td:nth-child(4)");
+    if (!verdictCell) return;
+
+    observing = true;
+    console.log(`[UJAX] 채점 대기 감지: ${dataNow.submissionId}번 (${dataNow.verdict})`);
+
+    const mo = new MutationObserver(() => {
+      if (sent) return;
+      const updated = parseRow(row);
+      if (!updated) return;
+      if (WAIT_RE.test(updated.verdict)) return; // 아직 채점 중
+
+      // 최종 결과 확정 → 1회 전송
+      sent = true;
+      mo.disconnect();
+      chrome.runtime.sendMessage({ type: "submissionData", data: updated });
+      console.log(`[UJAX] 채점 완료 전송: ${updated.submissionId}번 (${updated.verdict})`);
+    });
+
+    mo.observe(verdictCell, { childList: true, subtree: true, characterData: true });
   }
 
-  // 초기 스캔
-  scanTable();
+  // 행이 늦게 그려지는 경우 대비, 주기적으로 observer 부착 시도
+  const iv = setInterval(() => {
+    if (sent) { clearInterval(iv); return; }
+    attachObserver();
+  }, 400);
 
-  // MutationObserver로 채점 결과 변경 감지 (실시간 채점 업데이트 대응)
-  const table = document.getElementById("status-table");
-  if (table) {
-    const observer = new MutationObserver(() => scanTable());
-    observer.observe(table, { childList: true, subtree: true, characterData: true });
-  }
-
-  console.log("[UJAX] 채점 현황 모니터링 시작");
+  console.log("[UJAX] 채점 현황 모니터링 시작 (채점 대기 → 완료 감시)");
 })();
