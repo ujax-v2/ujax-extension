@@ -5,13 +5,13 @@
 // + On-Demand 크롤링 관리 (pendingCrawls)
 // ──────────────────────────────────────────────────────────────
 
-const API_BASE = "http://localhost:8080";
+const API_BASE = "https://ujax.kro.kr";
 const PROBLEM_INGEST_PATH = "/api/v1/problems/ingest";
 const SUBMISSION_INGEST_PATH = "/api/v1/submissions/ingest";
 const USER_ME_PATH = "/api/v1/users/me";
 
 // UJAX 프론트엔드 URL 패턴
-const UJAX_FRONT_URLS = ["http://localhost:5173/*", "https://ujax.site/*"];
+const UJAX_FRONT_URLS = ["http://localhost:5173/*", "https://ujax.kro.kr/*"];
 
 // solved.ac 티어 매핑 (0~30)
 const TIER_NAMES = [
@@ -69,7 +69,7 @@ async function notifyFrontend(problemNum, success, reason) {
     const msg = { type: "crawlComplete", problemNum, success };
     if (reason) msg.reason = reason;
     for (const tab of tabs) {
-      chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+      chrome.tabs.sendMessage(tab.id, msg).catch(() => { });
     }
   } catch {
     // 프론트엔드 탭이 없으면 무시
@@ -248,7 +248,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     const entry = pendingSource.get(sid);
     if (entry) {
       entry.resolve(message.code || "");
-      try { chrome.tabs.remove(entry.tabId); } catch {}
+      try { chrome.tabs.remove(entry.tabId); } catch { }
       pendingSource.delete(sid);
       console.log(`[UJAX] 소스 코드 수신 완료: ${sid}번 (${(message.code || "").length}자)`);
     }
@@ -313,7 +313,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
 async function closeCrawlTab(tabId) {
   if (tabId) {
-    chrome.tabs.remove(tabId).catch(() => {});
+    chrome.tabs.remove(tabId).catch(() => { });
   }
 }
 
@@ -399,7 +399,7 @@ function openSourceTabAndGetCode(submissionId) {
           const entry = pendingSource.get(sid);
           if (entry) {
             entry.resolve("");
-            try { chrome.tabs.remove(tab.id); } catch {}
+            try { chrome.tabs.remove(tab.id); } catch { }
             pendingSource.delete(sid);
             console.warn(`[UJAX] 소스 코드 수집 타임아웃: ${sid}번`);
           }
@@ -420,7 +420,7 @@ async function handleSubmissionData(data, statusTabId) {
     if (lastSubmitTabId) tabIds.add(lastSubmitTabId);
 
     for (const id of tabIds) {
-      try { await chrome.tabs.remove(id); } catch {}
+      try { await chrome.tabs.remove(id); } catch { }
     }
     lastSubmitTabId = null;
     if (tabIds.size > 0) console.log(`[UJAX] 백준 탭 ${tabIds.size}개 닫기 완료`);

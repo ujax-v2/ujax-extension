@@ -9,7 +9,7 @@
     "https://solved.ac/*",
     "http://localhost:8080/*",
     "http://localhost:5173/*",
-    "https://ujax.site/*"
+    "https://ujax.kro.kr/*"
   ],
   "background": {
     "service_worker": "scripts/background.js"
@@ -41,7 +41,7 @@
     {
       "matches": [
         "http://localhost:5173/*",
-        "https://ujax.site/*"
+        "https://ujax.kro.kr/*"
       ],
       "js": ["scripts/ujaxBridge.js"],
       "run_at": "document_end"
