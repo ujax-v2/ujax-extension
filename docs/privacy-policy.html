@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>개인정보처리방침 — UJAX Problem Collector</title>
+  <style>
+    body {
+      max-width: 760px;
+      margin: 60px auto;
+      padding: 0 24px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 15px;
+      line-height: 1.8;
+      color: #1f2937;
+    }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+    h2 { font-size: 17px; font-weight: 700; margin-top: 36px; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+    p { margin: 8px 0; }
+    ul { padding-left: 20px; margin: 8px 0; }
+    li { margin: 4px 0; }
+    .updated { font-size: 13px; color: #6b7280; margin-bottom: 32px; }
+    a { color: #3b82f6; text-decoration: none; }
+  </style>
+</head>
+<body>
+
+  <h1>개인정보처리방침</h1>
+  <p class="updated">최종 업데이트: 2026년 3월 27일</p>
+
+  <p>
+    UJAX Problem Collector(이하 "확장 프로그램")는 알고리즘 스터디 플랫폼
+    <a href="https://ujax.kro.kr" target="_blank">UJAX</a>와 연동하여
+    백준 온라인 저지의 문제 정보 및 제출 결과를 자동으로 수집·기록하는
+    Chrome 확장 프로그램입니다. 본 방침은 확장 프로그램이 수집하는 데이터와
+    그 사용 방식을 설명합니다.
+  </p>
+
+  <h2>1. 수집하는 데이터</h2>
+  <ul>
+    <li>
+      <strong>UJAX 인증 토큰(JWT)</strong> — UJAX 로그인 후 브라우저
+      localStorage에 저장된 액세스 토큰을 읽어 확장 프로그램 내부
+      저장소(chrome.storage.local)에 보관합니다. UJAX 서버에 문제·제출 데이터를
+      전송할 때 인증 수단으로만 사용됩니다.
+    </li>
+    <li>
+      <strong>백준 아이디(ID)</strong> — 백준 온라인 저지 페이지에서
+      로그인된 사용자 아이디를 감지하여 UJAX 계정과 자동 연동하는 데
+      사용됩니다.
+    </li>
+    <li>
+      <strong>문제 메타데이터</strong> — 백준 문제 페이지 방문 시 문제 번호,
+      제목, 설명, 입출력 예제 등을 수집하여 UJAX 서버에 등록합니다.
+    </li>
+    <li>
+      <strong>제출 결과</strong> — 백준 채점 현황에서 감지된 제출 ID,
+      결과(정답/오답 등), 언어, 소스 코드를 UJAX 서버에 기록합니다.
+    </li>
+    <li>
+      <strong>수집 이력(로컬 캐시)</strong> — 중복 수집 방지를 위해 수집된
+      문제 번호 및 전송된 제출 ID 목록을 로컬에 저장합니다.
+    </li>
+  </ul>
+
+  <h2>2. 데이터 사용 목적</h2>
+  <p>수집된 데이터는 오직 아래 목적으로만 사용됩니다.</p>
+  <ul>
+    <li>백준 문제 정보를 UJAX 플랫폼에 등록</li>
+    <li>사용자의 제출 결과를 UJAX 스터디 기록에 저장</li>
+    <li>백준 아이디와 UJAX 계정 자동 연동</li>
+  </ul>
+
+  <h2>3. 데이터 공유 및 제3자 전송</h2>
+  <p>
+    수집된 데이터는 사용자가 직접 가입한 UJAX 서버(<code>ujax.kro.kr</code>)에만
+    전송됩니다. 광고, 분석, 마케팅 등 다른 목적으로 제3자에게 판매하거나
+    전송하지 않습니다.
+  </p>
+  <p>
+    문제 난이도 및 태그 정보 보강을 위해 <a href="https://solved.ac" target="_blank">solved.ac</a>
+    공개 API를 호출합니다. 이 과정에서 문제 번호만 전송되며 개인 정보는
+    포함되지 않습니다.
+  </p>
+
+  <h2>4. 데이터 보관 및 삭제</h2>
+  <p>
+    모든 데이터는 사용자의 브라우저 로컬 저장소(chrome.storage.local)에
+    보관됩니다. 확장 프로그램을 삭제하면 모든 로컬 데이터가 함께 삭제됩니다.
+    UJAX 서버에 전송된 데이터는 UJAX 서비스 약관에 따라 관리됩니다.
+  </p>
+
+  <h2>5. 원격 코드 사용</h2>
+  <p>
+    확장 프로그램은 외부에서 코드를 다운로드하거나 <code>eval()</code>을
+    사용하지 않습니다. 모든 코드는 확장 프로그램 패키지 내에 포함되어 있습니다.
+  </p>
+
+  <h2>6. 문의</h2>
+  <p>
+    개인정보 처리에 관한 문의는
+    <a href="https://github.com/ujax-v2/ujax-extension/issues" target="_blank">
+      GitHub Issues
+    </a>를 통해 접수해 주세요.
+  </p>
+
+</body>
+</html>
