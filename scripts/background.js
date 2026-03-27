@@ -11,7 +11,7 @@ const SUBMISSION_INGEST_PATH = "/api/v1/submissions/ingest";
 const USER_ME_PATH = "/api/v1/users/me";
 
 // UJAX 프론트엔드 URL 패턴
-const UJAX_FRONT_URLS = ["http://localhost:5173/*", "https://ujax.kro.kr/*"];
+const UJAX_FRONT_URLS = ["https://ujax.kro.kr/*"];
 
 // solved.ac 티어 매핑 (0~30)
 const TIER_NAMES = [

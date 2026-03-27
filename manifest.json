@@ -7,8 +7,6 @@
   "host_permissions": [
     "https://www.acmicpc.net/*",
     "https://solved.ac/*",
-    "http://localhost:8080/*",
-    "http://localhost:5173/*",
     "https://ujax.kro.kr/*"
   ],
   "background": {
@@ -40,7 +38,6 @@
     },
     {
       "matches": [
-        "http://localhost:5173/*",
         "https://ujax.kro.kr/*"
       ],
       "js": ["scripts/ujaxBridge.js"],
