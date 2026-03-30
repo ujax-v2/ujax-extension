@@ -5,7 +5,7 @@
 // 이미 채점 완료된 상태(이전 제출)라면 무시한다.
 // ──────────────────────────────────────────────────────────────
 (function () {
-  const WAIT_RE = /(기다리는|채점|컴파일|Judging|Waiting|Compiling|Preparing)/;
+  const WAIT_RE = /(기다리는|채점 중|컴파일 중|Judging|Waiting|Compiling|Preparing)/;
   let observing = false;
   let sent = false;
 
