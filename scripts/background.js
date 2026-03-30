@@ -135,6 +135,30 @@ async function fetchSolvedAcMetadata(problemNum) {
 // ──────────────────────────────────────────────────────────────
 // 백엔드 API 전송
 // ──────────────────────────────────────────────────────────────
+
+// UJAX 프론트 탭의 localStorage에서 최신 토큰을 직접 읽어옴
+async function getFreshTokenFromPage() {
+  try {
+    const tabs = await chrome.tabs.query({ url: UJAX_FRONT_URLS });
+    if (tabs.length === 0) return null;
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world: "MAIN",
+      func: () => {
+        try {
+          const auth = JSON.parse(localStorage.getItem("auth") || "{}");
+          return auth.accessToken || null;
+        } catch { return null; }
+      },
+    });
+    const token = result?.result || null;
+    if (token) await chrome.storage.local.set({ ujaxToken: token });
+    return token;
+  } catch {
+    return null;
+  }
+}
+
 async function sendToBackend(path, payload, { requireAuth = false } = {}) {
   const headers = { "Content-Type": "application/json" };
 
@@ -471,8 +495,25 @@ async function handleSubmissionData(data, statusTabId) {
       console.log(`[UJAX] 제출 이미 등록됨: ${submissionId}번 (캐시 갱신)`);
       await notifySubmissionResult(data);
     } else if (res.status === 401) {
-      await chrome.storage.local.remove("ujaxToken");
-      console.warn(`[UJAX] 토큰 만료, 다음 로그인 시 재시도 (제출 ${submissionId}번)`);
+      console.warn(`[UJAX] 토큰 만료, 페이지에서 최신 토큰 재시도 (제출 ${submissionId}번)`);
+      const freshToken = await getFreshTokenFromPage();
+      if (freshToken) {
+        const retryRes = await fetch(`${API_BASE}${SUBMISSION_INGEST_PATH}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${freshToken}` },
+          body: JSON.stringify(payload),
+        });
+        if (retryRes.ok || retryRes.status === 409) {
+          await addToSentSubmissionSet(submissionId);
+          console.log(`[UJAX] 토큰 갱신 후 재시도 성공: ${submissionId}번`);
+          await notifySubmissionResult(data);
+        } else {
+          console.warn(`[UJAX] 재시도 실패: ${submissionId}번 (HTTP ${retryRes.status})`);
+        }
+      } else {
+        await chrome.storage.local.remove("ujaxToken");
+        console.warn(`[UJAX] 로그인 필요 (제출 ${submissionId}번 스킵)`);
+      }
     } else {
       console.warn(`[UJAX] 제출 등록 실패: ${submissionId}번 (HTTP ${res.status})`);
     }
