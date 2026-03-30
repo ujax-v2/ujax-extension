@@ -101,7 +101,7 @@ async function notifySubmissionResult(data) {
     }
     console.log(`[UJAX] 프론트엔드에 결과 전달: ${data.submissionId}번 (${data.verdict})`);
   } catch (err) {
-    console.error(`[UJAX] 프론트엔드 결과 전달 실패:`, err.message);
+    console.error(`[UJAX] 프론트엔드 결과 전달 실패:`, err);
   }
 }
 
@@ -190,7 +190,7 @@ async function linkBaekjoonId() {
       console.warn(`[UJAX] 백준 아이디 연동 실패 (HTTP ${res.status})`);
     }
   } catch (err) {
-    console.error("[UJAX] 백준 아이디 연동 네트워크 오류:", err.message);
+    console.error("[UJAX] 백준 아이디 연동 네트워크 오류:", err);
   }
 }
 
@@ -234,12 +234,12 @@ async function getWorkspaceProblemId(problemNum) {
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "problemData") {
     handleProblemData(message.data, sender.tab?.id);
-    return;
+    return true; // SW를 살려두기 위해 async 핸들러는 반드시 true 반환
   }
 
   if (message?.type === "submissionData") {
     handleSubmissionData(message.data, sender.tab?.id);
-    return;
+    return true; // SW를 살려두기 위해 async 핸들러는 반드시 true 반환
   }
 
   // sourceContent.js에서 소스 코드 수신
@@ -252,7 +252,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       pendingSource.delete(sid);
       console.log(`[UJAX] 소스 코드 수신 완료: ${sid}번 (${(message.code || "").length}자)`);
     }
-    return;
+    return true;
   }
 
   // 팝업 수동 크롤링
@@ -263,8 +263,8 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         url: `https://www.acmicpc.net/problem/${problemNum}`,
         active: true,
       });
-    });
-    return;
+    }).catch((err) => console.error("[UJAX] manualCrawl 오류:", err));
+    return true;
   }
 
   // 프론트엔드(ujaxBridge.js)에서 요청한 on-demand 크롤링
@@ -275,15 +275,15 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         url: `https://www.acmicpc.net/problem/${problemNum}`,
         active: false,
       });
-    });
-    return;
+    }).catch((err) => console.error("[UJAX] crawlRequest 오류:", err));
+    return true;
   }
 
   // 백준 아이디 감지 (bojDetect.js)
   if (message?.type === "bojUsername") {
     chrome.storage.local.set({ bojId: message.username });
     linkBaekjoonId();
-    return;
+    return true;
   }
 
   // UJAX 토큰 수신 (ujaxBridge.js)
@@ -294,20 +294,20 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     } else {
       chrome.storage.local.remove(["ujaxToken", "bojIdLinked"]);
     }
-    return;
+    return true;
   }
 
   // 문제 컨텍스트 수신 (ujaxBridge.js → Frontend)
   if (message?.type === "problemContext") {
     setProblemContext(message.problemNum, message.workspaceProblemId);
     console.log(`[UJAX] 문제 컨텍스트 저장: ${message.problemNum} → wpId=${message.workspaceProblemId}`);
-    return;
+    return true;
   }
 
   // 제출 요청 수신 (ujaxBridge.js → Frontend)
   if (message?.type === "submitRequest") {
     handleSubmitRequest(message);
-    return;
+    return true; // SW를 살려두기 위해 async 핸들러는 반드시 true 반환
   }
 });
 
@@ -372,7 +372,7 @@ async function handleProblemData(data, senderTabId) {
       await notifyFrontend(problemNum, false, "SERVER_ERROR");
     }
   } catch (err) {
-    console.error(`[UJAX] 네트워크 오류: ${problemNum}번`, err.message);
+    console.error(`[UJAX] 네트워크 오류: ${problemNum}번`, err);
     await notifyFrontend(problemNum, false, "NETWORK_ERROR");
   }
 
@@ -477,7 +477,8 @@ async function handleSubmissionData(data, statusTabId) {
       console.warn(`[UJAX] 제출 등록 실패: ${submissionId}번 (HTTP ${res.status})`);
     }
   } catch (err) {
-    console.error(`[UJAX] 제출 네트워크 오류: ${submissionId}번`, err.message);
+    console.error(`[UJAX] 제출 네트워크 오류: ${submissionId}번`, err);
+    console.error(`[UJAX] 오류 상세: name=${err.name}, message=${err.message}, stack=`, err.stack);
   }
 
   await closeBojTabs();
