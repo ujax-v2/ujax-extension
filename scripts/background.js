@@ -666,8 +666,8 @@ async function handleSubmitRequest({ problemNum, code, language }) {
     await sleep(300);
   }
 
-  // 5) 제출 버튼 클릭 (2초 대기 후)
-  await sleep(2000);
+  // 5) 제출 버튼 클릭 (3초 대기 후)
+  await sleep(3000);
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: () => {
