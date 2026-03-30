@@ -464,7 +464,7 @@ async function handleSubmissionData(data, statusTabId) {
   }
 
   // 소스 코드 수집: /source/{id} 탭을 열어 sourceContent.js가 코드를 전달
-  console.log(`[UJAX] 소스 코드 수집 시작: ${submissionId}번`);
+  console.log(`[UJAX] 소스 코드 수집 시작: ${submissionId}번 (언어: "${data.language}")`);
   const code = await openSourceTabAndGetCode(submissionId);
 
   const payload = {
@@ -534,10 +534,13 @@ async function handleSubmissionData(data, statusTabId) {
 let lastSubmitTabId = null;
 
 const LANG_TO_BOJ = {
-  java: "93",       // Java 11
-  python: "28",     // Python 3
-  cpp: "1001",      // C++17
   javascript: "17", // Node.js
+  python:     "28", // Python 3
+  cpp:        "84", // C++17
+  c:          "0",  // C99
+  java:       "93", // Java 11
+  csharp:     "86", // C#
+  kotlin:     "69", // Kotlin (JVM)
 };
 
 function waitForTabLoad(tabId) {
@@ -574,7 +577,11 @@ async function handleSubmitRequest({ problemNum, code, language }) {
   await sleep(500); // 에디터 초기화 대기
 
   // 2) 언어 선택 (DOM 조작 — isolated world)
-  const bojLangId = LANG_TO_BOJ[language] || "93";
+  const bojLangId = LANG_TO_BOJ[language];
+  if (!bojLangId) {
+    console.warn(`[UJAX] 지원하지 않는 언어: ${language}`);
+    return;
+  }
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: (langId) => {
