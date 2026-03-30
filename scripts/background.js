@@ -136,21 +136,44 @@ async function fetchSolvedAcMetadata(problemNum) {
 // 백엔드 API 전송
 // ──────────────────────────────────────────────────────────────
 
-// UJAX 프론트 탭의 localStorage에서 최신 토큰을 직접 읽어옴
+// UJAX 프론트 탭에서 refresh 엔드포인트를 호출해 새 accessToken 발급
 async function getFreshTokenFromPage() {
   try {
     const tabs = await chrome.tabs.query({ url: UJAX_FRONT_URLS });
     if (tabs.length === 0) return null;
+
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: tabs[0].id },
       world: "MAIN",
-      func: () => {
+      func: async () => {
         try {
           const auth = JSON.parse(localStorage.getItem("auth") || "{}");
-          return auth.accessToken || null;
-        } catch { return null; }
+          if (!auth.refreshToken) return null;
+
+          // 페이지 컨텍스트에서 refresh 호출 (dev proxy 경유)
+          const res = await fetch("/api/v1/auth/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refreshToken: auth.refreshToken }),
+          });
+          if (!res.ok) return null;
+
+          const { data } = await res.json();
+          // localStorage 갱신
+          localStorage.setItem("auth", JSON.stringify({
+            ...auth,
+            accessToken: data.accessToken,
+            refreshToken: data.refreshToken,
+          }));
+          // 프론트 Recoil에도 동기화
+          window.postMessage({ type: "ujaxTokenRefreshed", token: data.accessToken }, "*");
+          return data.accessToken;
+        } catch {
+          return null;
+        }
       },
     });
+
     const token = result?.result || null;
     if (token) await chrome.storage.local.set({ ujaxToken: token });
     return token;
