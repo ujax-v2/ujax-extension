@@ -590,6 +590,9 @@ async function handleSubmitRequest({ problemNum, code, language }) {
 
   console.log(`[UJAX] 자동 제출 시작: ${problemNum}번 (${language})`);
 
+  // statusContent.js가 최종 상태(컴파일 에러 등)도 즉시 캡처하도록 플래그 설정
+  await chrome.storage.local.set({ expectingSubmission: true });
+
   // 1) 백준 제출 페이지 열기 + 로드 대기
   const tab = await chrome.tabs.create({
     url: `https://www.acmicpc.net/submit/${problemNum}`,

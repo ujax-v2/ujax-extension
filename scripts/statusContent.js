@@ -2,12 +2,21 @@
 // ──────────────────────────────────────────────────────────────
 // 백준 채점 현황 페이지(acmicpc.net/status)에서 실행되는 Content Script
 // 첫 번째 행이 '기다리는/채점' 상태일 때만 감시하여, 채점 완료 시 1회 전송한다.
-// 이미 채점 완료된 상태(이전 제출)라면 무시한다.
+// expectingSubmission 플래그가 있으면 이미 최종 결과여도 즉시 전송한다.
 // ──────────────────────────────────────────────────────────────
 (function () {
   const WAIT_RE = /(기다리는|채점 중|컴파일 중|Judging|Waiting|Compiling|Preparing)/;
   let observing = false;
   let sent = false;
+  let expectingNew = false;
+
+  // 자동 제출 플래그 확인 (background.js가 제출 전 설정)
+  chrome.storage.local.get("expectingSubmission", ({ expectingSubmission }) => {
+    if (expectingSubmission) {
+      expectingNew = true;
+      chrome.storage.local.remove("expectingSubmission");
+    }
+  });
 
   function pickFirstRow() {
     return document.querySelector("#status-table tbody tr");
@@ -32,6 +41,14 @@
     return { submissionId, username, problemNum, verdict, time, memory, language, codeLength };
   }
 
+  function sendResult(data) {
+    if (sent) return;
+    sent = true;
+    clearInterval(iv);
+    chrome.runtime.sendMessage({ type: "submissionData", data });
+    console.log(`[UJAX] 채점 결과 전송: ${data.submissionId}번 (${data.verdict})`);
+  }
+
   function attachObserver() {
     if (observing || sent) return;
 
@@ -41,26 +58,30 @@
     const dataNow = parseRow(row);
     if (!dataNow) return;
 
-    // 첫 로딩 시 이미 채점 완료 상태 → 이전 제출이므로 스킵
-    if (!WAIT_RE.test(dataNow.verdict)) return;
+    if (!WAIT_RE.test(dataNow.verdict)) {
+      // 이미 최종 결과 — 자동 제출로 열린 탭이면 즉시 전송, 아니면 스킵
+      if (expectingNew) {
+        console.log(`[UJAX] 최종 결과 즉시 감지: ${dataNow.submissionId}번 (${dataNow.verdict})`);
+        sendResult(dataNow);
+      }
+      return;
+    }
+
+    // 대기 중 → observer 설정
+    observing = true;
+    expectingNew = false; // 이미 감지 시작
+    console.log(`[UJAX] 채점 대기 감지: ${dataNow.submissionId}번 (${dataNow.verdict})`);
 
     const verdictCell = row.querySelector("td:nth-child(4)");
     if (!verdictCell) return;
-
-    observing = true;
-    console.log(`[UJAX] 채점 대기 감지: ${dataNow.submissionId}번 (${dataNow.verdict})`);
 
     const mo = new MutationObserver(() => {
       if (sent) return;
       const updated = parseRow(row);
       if (!updated) return;
       if (WAIT_RE.test(updated.verdict)) return; // 아직 채점 중
-
-      // 최종 결과 확정 → 1회 전송
-      sent = true;
       mo.disconnect();
-      chrome.runtime.sendMessage({ type: "submissionData", data: updated });
-      console.log(`[UJAX] 채점 완료 전송: ${updated.submissionId}번 (${updated.verdict})`);
+      sendResult(updated);
     });
 
     mo.observe(verdictCell, { childList: true, subtree: true, characterData: true });
@@ -72,5 +93,5 @@
     attachObserver();
   }, 400);
 
-  console.log("[UJAX] 채점 현황 모니터링 시작 (채점 대기 → 완료 감시)");
+  console.log("[UJAX] 채점 현황 모니터링 시작");
 })();
