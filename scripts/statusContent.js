@@ -5,7 +5,7 @@
 // expectingSubmission 플래그가 있으면 이미 최종 결과여도 즉시 전송한다.
 // ──────────────────────────────────────────────────────────────
 (function () {
-  const WAIT_RE = /(기다리는|채점 준비 중|채점 중|컴파일 중|Judging|Waiting|Compiling|Preparing)/;
+  const WAIT_RE = /(기다리는|채점 중|컴파일 중|Judging|Waiting|Compiling|Preparing)/;
   let observing = false;
   let sent = false;
   let expectingNew = false;
