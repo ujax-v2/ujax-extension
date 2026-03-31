@@ -596,7 +596,7 @@ async function handleSubmitRequest({ problemNum, code, language }) {
   // 1) 백준 제출 페이지 열기 + 로드 대기
   const tab = await chrome.tabs.create({
     url: `https://www.acmicpc.net/submit/${problemNum}`,
-    active: false,
+    active: true,
   });
   lastSubmitTabId = tab.id;
   await waitForTabLoad(tab.id);
