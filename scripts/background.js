@@ -596,13 +596,13 @@ async function handleSubmitRequest({ problemNum, code, language }) {
   // 1) 백준 제출 페이지 열기 + 로드 대기
   const tab = await chrome.tabs.create({
     url: `https://www.acmicpc.net/submit/${problemNum}`,
-    active: false,
+    active: true, // 제출 페이지를 활성 탭으로 열어 Cloudflare 스크립트 차단을 방지
   });
   lastSubmitTabId = tab.id;
   await waitForTabLoad(tab.id);
   await sleep(500); // 에디터 초기화 대기
 
-  // 2) 언어 선택 (DOM 조작 — isolated world)
+  // 2) 언어 선택 (DOM 조작 — MAIN world)
   const bojLangId = LANG_TO_BOJ[language];
   if (!bojLangId) {
     console.warn(`[UJAX] 지원하지 않는 언어: ${language}`);
@@ -610,11 +610,16 @@ async function handleSubmitRequest({ problemNum, code, language }) {
   }
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
+    world: "MAIN",
     func: (langId) => {
       const select = document.getElementById("language");
       if (select) {
         select.value = langId;
         select.dispatchEvent(new Event("change", { bubbles: true }));
+        // 백준에서 사용하는 jQuery 기반 chosen.js 드롭다운 UI 강제 업데이트
+        if (window.jQuery && window.jQuery(select).trigger) {
+          window.jQuery(select).trigger("chosen:updated");
+        }
         console.log("[UJAX] 언어 선택 완료:", langId);
       } else {
         console.warn("[UJAX] 언어 선택 드롭다운(#language)을 찾을 수 없음");
@@ -669,31 +674,44 @@ async function handleSubmitRequest({ problemNum, code, language }) {
     args: [code],
   });
 
-  // 4) Turnstile 대기 (최대 10초)
-  const TURNSTILE_TIMEOUT = 10_000;
+  // 4) Turnstile 대기 (최대 60초)
+  const TURNSTILE_TIMEOUT = 60_000;
   const start = Date.now();
-  while (Date.now() - start < TURNSTILE_TIMEOUT) {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        var frame = document.querySelector(
-          'iframe[src*="turnstile"], iframe[src*="challenges.cloudflare.com"]'
-        );
-        if (!frame) return "no-turnstile";
-        var input = document.querySelector('input[name="cf-turnstile-response"]');
-        return input && input.value ? "ready" : "waiting";
-      },
-    });
+  let turnstilePassed = false;
 
-    if (result.result === "no-turnstile" || result.result === "ready") {
-      console.log(`[UJAX] Turnstile: ${result.result}`);
-      break;
+  while (Date.now() - start < TURNSTILE_TIMEOUT) {
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          var frame = document.querySelector(
+            'iframe[src*="turnstile"], iframe[src*="challenges.cloudflare.com"]'
+          );
+          if (!frame) return "no-turnstile";
+          var input = document.querySelector('input[name="cf-turnstile-response"]');
+          return input && input.value ? "ready" : "waiting";
+        },
+      });
+
+      if (result.result === "no-turnstile" || result.result === "ready") {
+        console.log(`[UJAX] Turnstile: ${result.result}`);
+        turnstilePassed = true;
+        break;
+      }
+    } catch (e) {
+      console.warn("[UJAX] Turnstile 상태 확인 중 에러(무시됨):", e);
     }
-    await sleep(300);
+    
+    await sleep(500);
   }
 
-  // 5) 제출 버튼 클릭 (3초 대기 후)
-  await sleep(3000);
+  if (!turnstilePassed) {
+    console.warn("[UJAX] Turnstile 시간 초과 (60초). 수동 제출 필요.");
+    return; // Turnstile을 통과하지 못하면 자동으로 제출 버튼을 누르지 않음
+  }
+
+  // 5) 제출 버튼 클릭 (짧게 대기 후)
+  await sleep(500);
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: () => {
