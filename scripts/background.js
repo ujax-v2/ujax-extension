@@ -462,6 +462,11 @@ async function handleSubmissionData(data, statusTabId) {
 
   async function closeBojTabs() {
     await sleep(500);
+
+    // BOJ 탭 닫기 전에 UJAX 탭 ID 확보
+    const ujaxTabs = await chrome.tabs.query({ url: UJAX_FRONT_URLS });
+    const ujaxTabId = ujaxTabs[0]?.id ?? null;
+
     const tabIds = new Set();
     if (statusTabId) tabIds.add(statusTabId);
     if (lastSubmitTabId) tabIds.add(lastSubmitTabId);
@@ -471,6 +476,12 @@ async function handleSubmissionData(data, statusTabId) {
     }
     lastSubmitTabId = null;
     if (tabIds.size > 0) console.log(`[UJAX] 백준 탭 ${tabIds.size}개 닫기 완료`);
+
+    // UJAX 탭으로 포커스 복귀
+    if (ujaxTabId) {
+      chrome.tabs.update(ujaxTabId, { active: true });
+      console.log(`[UJAX] UJAX 탭으로 포커스 복귀: ${ujaxTabId}`);
+    }
   }
 
   if (await isAlreadySentSubmission(submissionId)) {
