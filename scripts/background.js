@@ -703,33 +703,48 @@ async function handleSubmitRequest({ problemNum, code, language }) {
     await sleep(300);
   }
 
-  // 5) 제출 버튼 클릭 (3초 대기 후)
-  await sleep(3000);
+  // 5) 제출 안내 UI 삽입 (자동 클릭 대신 사용자가 직접 제출)
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: () => {
+      // 안내 배너
+      var banner = document.createElement("div");
+      banner.id = "ujax-submit-banner";
+      banner.style.cssText = [
+        "position:fixed", "top:0", "left:0", "right:0", "z-index:99999",
+        "background:#4f46e5", "color:#fff",
+        "padding:14px 20px", "font-size:15px", "font-weight:bold",
+        "text-align:center", "box-shadow:0 2px 10px rgba(0,0,0,0.35)",
+        "display:flex", "align-items:center", "justify-content:center", "gap:10px",
+        "font-family:sans-serif", "letter-spacing:0.3px",
+      ].join(";");
+      banner.innerHTML =
+        "<span style='font-size:18px'>✅</span>" +
+        "<span>UJAX: 코드와 언어가 자동으로 입력되었습니다. &nbsp;" +
+        "<strong style='text-decoration:underline'>제출하기</strong> 버튼을 눌러주세요!</span>" +
+        "<span style='font-size:18px'>👇</span>";
+      document.body.prepend(banner);
+
+      // 제출 버튼 강조
       var btn =
         document.getElementById("submit_button") ||
         document.querySelector('button[type="submit"]') ||
         document.querySelector('input[type="submit"]') ||
-        document.querySelector("#submit-form button") ||
-        document.querySelector("form button");
+        document.querySelector("#submit-form button");
       if (btn) {
-        btn.click();
-        console.log("[UJAX] 제출 버튼 클릭 완료");
-      } else {
-        var form = document.querySelector("form");
-        if (form) {
-          form.submit();
-          console.log("[UJAX] 폼 제출 완료 (fallback)");
-        } else {
-          console.warn("[UJAX] 제출 버튼/폼을 찾을 수 없음");
-        }
+        btn.style.cssText += [
+          ";outline:3px solid #4f46e5",
+          "outline-offset:4px",
+          "box-shadow:0 0 0 6px rgba(79,70,229,0.25)",
+          "transform:scale(1.08)",
+          "transition:all 0.2s",
+        ].join(";");
       }
+      console.log("[UJAX] 제출 안내 UI 삽입 완료");
     },
   });
 
-  console.log(`[UJAX] 자동 제출 완료: ${problemNum}번`);
+  console.log(`[UJAX] 코드 입력 완료, 사용자 제출 대기: ${problemNum}번`);
 }
 
 console.log("[UJAX] Background service worker 시작");
