@@ -5,6 +5,12 @@
 // 2) 프론트엔드 ↔ 확장 프로그램 간 크롤링 요청/완료 메시지 중계
 // ──────────────────────────────────────────────────────────────
 (function () {
+  const BRIDGE_INIT_ATTR = "data-ujax-bridge-initialized";
+  const rootEl = document.documentElement;
+  if (rootEl?.getAttribute(BRIDGE_INIT_ATTR) === "1") return;
+  if (rootEl) rootEl.setAttribute(BRIDGE_INIT_ATTR, "1");
+  const PAGE_ORIGIN = window.location.origin;
+
   /** extension 컨텍스트가 유효한지 확인 (리로드/업데이트 후 무효화 방지) */
   function isContextValid() {
     try {
@@ -19,24 +25,28 @@
     chrome.runtime.sendMessage(msg).catch(() => {});
   }
 
+  function parsePositiveProblemNum(value) {
+    const num = Number(value);
+    return Number.isInteger(num) && num > 0 ? num : null;
+  }
+
   // ── 토큰 전달 ──────────────────────────────────────────────
 
   function sendToken() {
     try {
       const raw = localStorage.getItem("auth");
       if (!raw) {
-        safeSendMessage({ type: "ujaxToken", token: null });
+        safeSendMessage({ type: "ujaxToken", token: null, bojId: null });
         return;
       }
       const auth = JSON.parse(raw);
-      if (auth.accessToken) {
-        safeSendMessage({
-          type: "ujaxToken",
-          token: auth.accessToken,
-        });
-      }
+      safeSendMessage({
+        type: "ujaxToken",
+        token: auth.accessToken || null,
+        bojId: auth.baekjoonId || null,
+      });
     } catch {
-      // JSON 파싱 실패 시 무시
+      safeSendMessage({ type: "ujaxToken", token: null, bojId: null });
     }
   }
 
@@ -52,18 +62,25 @@
 
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
+    if (event.origin !== PAGE_ORIGIN) return;
 
     // 토큰 갱신 (같은 탭에서 refreshToken 시 storage 이벤트가 안 발생하므로 직접 전달)
     if (event.data?.type === "ujaxTokenRefreshed" && event.data?.token) {
+      sendToken();
+    }
+    if (event.data?.type === "ujaxAuthChanged") {
       safeSendMessage({
         type: "ujaxToken",
-        token: event.data.token,
+        token: event.data.token || null,
+        bojId: event.data.bojId || null,
       });
     }
     if (event.data?.type === "ujaxCrawlRequest" && event.data?.problemNum) {
+      const problemNum = parsePositiveProblemNum(event.data.problemNum);
+      if (!problemNum) return;
       safeSendMessage({
         type: "crawlRequest",
-        problemNum: event.data.problemNum,
+        problemNum,
       });
     }
     if (event.data?.type === "ujaxProblemContext" && event.data?.problemNum && event.data?.workspaceProblemId) {
@@ -79,6 +96,7 @@
         problemNum: event.data.problemNum,
         code: event.data.code,
         language: event.data.language,
+        expectedBojId: event.data.expectedBojId || null,
       });
     }
   });
@@ -94,18 +112,19 @@
           success: message.success,
         };
         if (message.reason) msg.reason = message.reason;
-        window.postMessage(msg, "*");
+        window.postMessage(msg, PAGE_ORIGIN);
       }
       if (message?.type === "submissionResult") {
         window.postMessage({
           type: "ujaxSubmissionResult",
           problemNum: message.problemNum,
           verdict: message.verdict,
+          reasonCode: message.reasonCode || null,
           submissionId: message.submissionId,
           time: message.time,
           memory: message.memory,
           language: message.language,
-        }, "*");
+        }, PAGE_ORIGIN);
       }
     });
   }

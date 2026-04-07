@@ -20,6 +20,47 @@
     const $ = (sel) => document.querySelector(sel);
     const html = (el) => (el ? el.innerHTML.trim() : "");
     const txt = (el) => (el ? el.innerText.trim() : "");
+    const DANGEROUS_TAG_SELECTOR = [
+      "script",
+      "iframe",
+      "object",
+      "embed",
+      "form",
+      "style",
+      "link",
+      "meta",
+      "base",
+      "template",
+    ].join(",");
+
+    function sanitizeProblemHtml(rawHtml) {
+      if (!rawHtml) return "";
+      const container = document.createElement("div");
+      container.innerHTML = rawHtml;
+
+      container.querySelectorAll(DANGEROUS_TAG_SELECTOR).forEach((el) => el.remove());
+
+      container.querySelectorAll("*").forEach((el) => {
+        for (const attr of [...el.attributes]) {
+          const name = attr.name.toLowerCase();
+          const value = String(attr.value || "").trim().toLowerCase();
+
+          if (name.startsWith("on") || name === "style") {
+            el.removeAttribute(attr.name);
+            continue;
+          }
+
+          if (
+            (name === "src" || name === "href" || name === "xlink:href" || name === "formaction") &&
+            (value.startsWith("javascript:") || value.startsWith("data:"))
+          ) {
+            el.removeAttribute(attr.name);
+          }
+        }
+      });
+
+      return container.innerHTML;
+    }
 
     const title = txt($("#problem_title"));
 
@@ -32,9 +73,9 @@
       return;
     }
 
-    const description = html($("#problem_description"));
-    const inputDescription = html($("#problem_input"));
-    const outputDescription = html($("#problem_output"));
+    const description = sanitizeProblemHtml(html($("#problem_description")));
+    const inputDescription = sanitizeProblemHtml(html($("#problem_input")));
+    const outputDescription = sanitizeProblemHtml(html($("#problem_output")));
 
     // 시간/메모리 제한 — #problem-info 테이블에서 추출
     let timeLimit = "";

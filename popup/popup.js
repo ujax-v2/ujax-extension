@@ -13,18 +13,20 @@
     countEl.textContent = (crawledProblems || []).length;
   });
 
-  // 연동 상태 표시
+  // 연동 상태 표시 (BOJ 아이디는 프론트 기준으로만 사용)
   chrome.storage.local.get(
-    ["ujaxToken", "bojId", "bojIdLinked"],
-    ({ ujaxToken, bojId, bojIdLinked }) => {
+    ["ujaxToken", "frontBojId"],
+    ({ ujaxToken, frontBojId }) => {
       if (ujaxToken) {
         ujaxBadge.textContent = "연결됨";
         ujaxBadge.className = "badge badge-ok";
       }
-      if (bojId) {
-        const linked = bojIdLinked === bojId;
-        bojBadge.textContent = linked ? `${bojId} (연동)` : `${bojId} (대기)`;
-        bojBadge.className = linked ? "badge badge-ok" : "badge badge-no";
+      if (frontBojId) {
+        bojBadge.textContent = `${frontBojId} (프론트)`;
+        bojBadge.className = "badge badge-ok";
+      } else {
+        bojBadge.textContent = "프론트 기준 미설정";
+        bojBadge.className = "badge badge-no";
       }
     }
   );
