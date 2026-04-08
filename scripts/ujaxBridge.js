@@ -30,6 +30,21 @@
     return Number.isInteger(num) && num > 0 ? num : null;
   }
 
+  function getExtensionVersion() {
+    try {
+      return chrome.runtime.getManifest()?.version || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function postBridgeReady() {
+    window.postMessage(
+      { type: "ujaxBridgeReady", version: getExtensionVersion() },
+      PAGE_ORIGIN
+    );
+  }
+
   // ── 토큰 전달 ──────────────────────────────────────────────
 
   function sendToken() {
@@ -52,6 +67,7 @@
 
   // 페이지 로드 시 토큰 전달
   sendToken();
+  postBridgeReady();
 
   // localStorage 변경 감지 (다른 탭에서 로그인/로그아웃 시)
   window.addEventListener("storage", (e) => {
@@ -63,6 +79,15 @@
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     if (event.origin !== PAGE_ORIGIN) return;
+
+    if (event.data?.type === "ujaxBridgePing") {
+      window.postMessage({
+        type: "ujaxBridgePong",
+        nonce: event.data?.nonce || null,
+        version: getExtensionVersion(),
+      }, PAGE_ORIGIN);
+      return;
+    }
 
     // 토큰 갱신 (같은 탭에서 refreshToken 시 storage 이벤트가 안 발생하므로 직접 전달)
     if (event.data?.type === "ujaxTokenRefreshed" && event.data?.token) {
